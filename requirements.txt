@@ -1,0 +1,10 @@
+librosa>=0.10.0
+Flask>=2.2.2
+flask-paginate>=2022.1.8
+Flask-Session>=0.4.0
+numpy>=1.24.1
+tensorflow>=2.4.0
+requests>=2.28.1
+scikit-learn>=1.2.0
+pandas>=1.2.0
+matplotlib>=3.3.0c
