@@ -7,5 +7,10 @@
 <body>
     <h1>Music Genre Classification System</h1>
     <h2>By Furqan Kassa and Zeki Mohamed</h2>
+    <h3>{{message}}</h3>
+    <form action="{{ url_for('upload') }}" method="POST" enctype="multipart/form-data">
+        <input type="file" name="file" />
+        <input type="submit" />
+    </form>
 </body>
 </html>
