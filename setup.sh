@@ -1,7 +1,7 @@
 # Script to set up the environment easier. 
 
 # To create a new environment in python for this project
-python3 -m venv env
+python -m venv env
 
 # Activate the environment:
 
@@ -15,4 +15,4 @@ source env/bin/activate
 pip3 install -r requirements.txt
 
 # To run the app
-python3 run.py
+python main.py run
