@@ -1,5 +1,6 @@
 
 import os
+from typing import Any
 import pandas as pd
 import librosa as lib
 import numpy as np
@@ -23,49 +24,48 @@ music_df = pd.DataFrame() # global access to the dataframe
 # Model work
 def extract_features() -> None:
     """
-    Loops through the genre directory, extracts the signal and sample
-    rate from the audio files, calculates the MFCC features and calls
-    the build_features() to create a dataframe. 
-    """
-    frequency = []
-
-    for genre in os.listdir(path):
-        genre_path = path + '/' + genre + '/'
-        curr_frequency = []
-        for audio_file in os.listdir(genre_path):
-            signal, sample_rate = lib.load(genre_path + audio_file)
-            mfccs = lib.feature.mfcc(y=signal, sr=sample_rate, n_mfcc=1) # PUT 20
-            curr_frequency.append(np.mean(mfccs.T, axis=0))
-        frequency.append(curr_frequency)
-
-    build_features(frequency)
-
-
-def build_features(frequency: list[list[list[float]]]) -> None:
-    """
-    Passes in the frequency, and creates a dataframe of the MFCC feature.
-    Will need to add the rest of the 19 MFCC features, too much data to loop 
+    Loops through the genre directory and extracts the MFCC features
+    from the audio files and builds a dataframe out of those features. 
     """
     global music_df
-    data_frame = []
+    features = []
     label = ["blues", "classical", "country", "disco",
              "hiphop", "jazz", "metal", "pop", "reggae", 
              "rock"]
+
+    for idx, genre in enumerate(os.listdir(path)):
+        genre_path = path + '/' + genre + '/'
+        for audio_file in os.listdir(genre_path):
+            curr_mfcc = calculate_mfcc(genre_path + audio_file)
+            features.append([label[idx], curr_mfcc])
     
-    for idx, freq in enumerate(frequency):
-        for mfcc in freq:
-            for val in mfcc:
-                data_frame.append([label[idx], val])
-    
-    music_df = pd.DataFrame(data_frame, columns=["Genre-Names", "MFCC-1"])
+    music_df = pd.DataFrame(features, columns=["label", "feature"])
 
 
-def calculate_upload(file_path: str) -> list[float]:
-    signal, sample_rate = lib.load("audio_music/uploads/" + file_path)
-    mfccs = lib.feature.mfcc(y=signal, sr=sample_rate, n_mfcc=1) # PUT 20
+def calculate_mfcc(file_path: str) -> list[float]:
+    """
+    Loads the audio file and retrieves the signal and sample rate
+    to calculate the MFCC feature of each audio file. Returns
+    a list of the mean MFCC values acorss the time axis.
+    """
+    signal, sample_rate = lib.load(file_path)
+    mfccs = lib.feature.mfcc(y=signal, sr=sample_rate, n_mfcc=20)
     return np.mean(mfccs.T, axis=0)
+
+
+def select_file(file_path: str) -> None | str:
+    """
+    Extracts the features from the audio file uploaded by the user
+    and uses the trained model to make a predicted on the extracted
+    features.
+    """
+    if (not file_path):
+        return None
     
-    
+    # Extract features from the selected file
+    # features = extract_features(file_path)
+    # label = model.predict([features])[0]
+
 def train_model(data: pd.DataFrame) -> str:
     """
     Only because we have 1 feature rn, TESTING purporses.
@@ -78,7 +78,6 @@ def train_model(data: pd.DataFrame) -> str:
     label = music_df["Genre-Names"]
 
     """
-    ["classical"]
     features_train, features_test, label_train, label_test =
                     train_test_split(features, label, test_size=0.2)
     """
@@ -92,7 +91,11 @@ def train_model(data: pd.DataFrame) -> str:
 
 
 def main():
+    """
+    Calls extract_features() for feature engineering.
+    """
     extract_features()
+
 
 # Creates an instance of the flask web application
 app = Flask(__name__)
@@ -101,7 +104,8 @@ app = Flask(__name__)
 @app.route("/")
 def index():
     """
-    When the website is loaded, it renders the HTML home page.
+    When the website is loaded, it renders the HTML home page. It represents
+    the main entry to our web application.
     """
     return render_template("index.html")
 
@@ -117,16 +121,20 @@ def upload():
     if (not f.filename.endswith(".wav")):
         return redirect(url_for("display_error",
                                 message="Please upload a .wav audio file!"))
-    
     f.save(os.path.join("audio_music/uploads", f.filename))
     return redirect(url_for("calculate", file_name=f.filename))
 
 
 @app.route("/calculate/<file_name>")
 def calculate(file_name: str):
-    frequency = calculate_upload(file_name)
+    """
+    If the user uploads a valid .wave file, then the features will be extracted
+    from the uploaded audio and a prediction will be made. The accuracy score
+    will be displayed as well as the name of genre classified by the model.
+    """
+    frequency = select_file("audio_music/uploads/" + file_name)
     genre = train_model(frequency)
-    # os.remove(file_name) # remove file from server after getting genre
+    # os.remove(file_name) remove file from server after getting genre
     return render_template("results.html", outcome=f"Genre: {genre}")
 
 
@@ -142,8 +150,9 @@ def display_error(message: str):
 @app.route("/<path:path>")
 def redirect_to_home(path: str):
     """
-    Passes in the invalid path and redirects users back to the home page
-    if they type a page in the search bar that doesn't exist in the domain.
+    If user tries to access the "results" page through typing on the domain
+    without uploading a file or if the user access non-existent page, it'll
+    return the user back to the home page.
     """
     return redirect(url_for("index"))
 
