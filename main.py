@@ -1,16 +1,18 @@
 
 import os
-from typing import Any
 import pandas as pd
 import librosa as lib
 import numpy as np
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
 from flask import Flask, render_template, url_for, request, redirect
 
 
-# Model work
+# Global access to the model.
+model = None
+
+
 def extract_features() -> None:
     """
     Loops through the genre directory and extracts the MFCC features
@@ -23,16 +25,20 @@ def extract_features() -> None:
              "rock"]
 
     for idx, genre in enumerate(os.listdir(path)):
-        genre_path = path + '/' + genre + '/'
+        genre_path = os.path.join(path, genre)
         for audio_file in os.listdir(genre_path):
-            extracted_feat = build_features(genre_path + audio_file)
+            file_path = os.path.join(genre_path, audio_file)
+            print(file_path)
+            extracted_feat = build_features(file_path)
             curr_mfcc = [mfcc for mfcc in extracted_feat[-1]]
-            features.append([label[idx]] + [extracted_feat[0]] + [extracted_feat[1]]
-                                                               + [extracted_feat[2]] + curr_mfcc)
+            features.append([label[idx]] + extracted_feat[:-1] + curr_mfcc)
 
-    columns = ["Genre", "Centroid", "Bandwith", "Chroma"] + [f"MFCC-{i + 1}" for i in range(20)]
+    columns = ["Genre", "Centroid", "Bandwith", "Tonnetz", "Chroma", "RMS", 
+               "Flat", "Contrast", "Zero-Crossing-Rate", "Roll-Off"] + \
+              [f"MFCC-{i + 1}" for i in range(20)]
     df = pd.DataFrame(features, columns=columns)
-    train_model(df)
+    df.to_csv("audio_features.csv", index=False)
+    print("better?", train_model(df))
 
 
 def build_features(file_path: str) -> list[float]:
@@ -42,11 +48,22 @@ def build_features(file_path: str) -> list[float]:
     of each audio file. Returns a list of the mean values of the features.
     """
     signal, sample_rate = lib.load(file_path)
-    centr = lib.feature.spectral_centroid(y=signal, sr=sample_rate)
-    bandw = lib.feature.spectral_bandwidth(y=signal, sr=sample_rate)
+    centroid = lib.feature.spectral_centroid(y=signal, sr=sample_rate)
+    bandwith = lib.feature.spectral_bandwidth(y=signal, sr=sample_rate)
+    tonnetz = lib.feature.tonnetz(y=lib.effects.harmonic(signal), 
+                                  sr=sample_rate)
     chroma = lib.feature.chroma_cens(y=signal, sr=sample_rate)
+    rms = lib.feature.rms(y=signal)
+    flat = lib.feature.spectral_flatness(y=signal)
+    contrast = lib.feature.spectral_contrast(S=np.abs(lib.stft(signal)), 
+                                             sr=sample_rate)
+    zero_crossing_rate = lib.feature.zero_crossing_rate(y=signal)
+    roll_off = flat = lib.feature.spectral_rolloff(y=signal, sr=sample_rate)
     mfccs = lib.feature.mfcc(y=signal, sr=sample_rate, n_mfcc=20)
-    return [np.mean(centr), np.mean(bandw), np.mean(chroma), np.mean(mfccs.T, axis=0)]
+    return [np.mean(centroid), np.mean(bandwith), np.mean(tonnetz),
+            np.mean(chroma), np.mean(rms), np.mean(contrast), np.mean(flat),
+            np.mean(zero_crossing_rate), np.mean(roll_off), np.mean(mfccs.T, 
+                                                                    axis=0)]
 
 
 def train_model(data: pd.DataFrame) -> float:
@@ -55,41 +72,44 @@ def train_model(data: pd.DataFrame) -> float:
     the genre by utilizing the extracted features. Split the
     data for testing/training and returns an accuracy score.
     """
+    global model
     features = data.loc[:, "Centroid":"MFCC-20"]
     label = data["Genre"]
 
     features_train, features_test, label_train, label_test = \
                     train_test_split(features, label, test_size=0.2)
     
-    model = DecisionTreeClassifier()
+    model = RandomForestClassifier(n_estimators=143, random_state=56, max_depth=15)
     model.fit(features_train, label_train)
-    
+
     prediction = model.predict(features_test)
     return accuracy_score(label_test, prediction)
 
 
-def select_file(file_path: str) -> None:
+def select_file(file_path: str) -> str:
     """
     Extracts the features from the audio file uploaded by the user
     and uses the trained model to make a predicted on the extracted
     features.
     """
-    if (not file_path):
-        return None
-    pass
-    # Extract features from the selected file
-    # features = extract_features(file_path)
-    # label = model.predict([features])[0]
+    global model
+    features = build_features(file_path)
+    curr_mfcc = [mfcc for mfcc in features[-1]]
+    os.remove(file_path)
+    return model.predict([features[:-1] + curr_mfcc])[0]
+
 
 
 def main():
     """
     Calls extract_features() for feature engineering.
     """
-    extract_features()
+    # if (not os.path.exists("audio_features.csv")):
+    # extract_features()
+    print(train_model(pd.read_csv("audio_features.csv")))
 
 
-# Creates an instance of the flask web application
+# Creates an instance of the flask web application.
 app = Flask(__name__)
 
 
@@ -124,9 +144,7 @@ def calculate(file_name: str):
     from the uploaded audio and a prediction will be made. The accuracy score
     will be displayed as well as the name of genre classified by the model.
     """
-    frequency = "" """select_file("audio_music/uploads/" + file_name)"""
-    genre = train_model(frequency)
-    # os.remove(file_name) remove file from server after getting genre
+    genre = select_file("audio_music/user_uploads/" + file_name)
     return render_template("results.html", outcome=f"Genre: {genre}")
 
 
@@ -142,13 +160,13 @@ def display_error(message: str):
 @app.route("/<path:path>")
 def redirect_to_home(path: str):
     """
-    If user tries to access the "results" page through typing on the domain
-    without uploading a file or if the user access non-existent page, it'll
-    return the user back to the home page.
+    If user tries to access the "results" page without uploading a 
+    ile or if the user access non-existent page, it'll return the
+    user back to the home page.
     """
     return redirect(url_for("index"))
 
 
 if (__name__ == "__main__"):
     main()
-    app.run(debug=True)
+    # app.run(debug=True)
