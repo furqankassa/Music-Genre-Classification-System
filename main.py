@@ -38,7 +38,6 @@ def extract_features() -> None:
               [f"MFCC-{i + 1}" for i in range(20)]
     df = pd.DataFrame(features, columns=columns)
     df.to_csv("audio_features.csv", index=False)
-    print("better?", train_model(df))
 
 
 def build_features(file_path: str) -> list[float]:
@@ -57,13 +56,12 @@ def build_features(file_path: str) -> list[float]:
     flat = lib.feature.spectral_flatness(y=signal)
     contrast = lib.feature.spectral_contrast(S=np.abs(lib.stft(signal)), 
                                              sr=sample_rate)
-    zero_crossing_rate = lib.feature.zero_crossing_rate(y=signal)
+    zcr = lib.feature.zero_crossing_rate(y=signal)
     roll_off = flat = lib.feature.spectral_rolloff(y=signal, sr=sample_rate)
     mfccs = lib.feature.mfcc(y=signal, sr=sample_rate, n_mfcc=20)
-    return [np.mean(centroid), np.mean(bandwith), np.mean(tonnetz),
+    return [np.mean(centroid), np.mean(bandwith), np.mean(tonnetz), 
             np.mean(chroma), np.mean(rms), np.mean(contrast), np.mean(flat),
-            np.mean(zero_crossing_rate), np.mean(roll_off), np.mean(mfccs.T, 
-                                                                    axis=0)]
+            np.mean(zcr), np.mean(roll_off), np.mean(mfccs.T, axis=0)]
 
 
 def train_model(data: pd.DataFrame) -> float:
@@ -79,14 +77,14 @@ def train_model(data: pd.DataFrame) -> float:
     features_train, features_test, label_train, label_test = \
                     train_test_split(features, label, test_size=0.2)
     
-    model = RandomForestClassifier(n_estimators=143, random_state=56, max_depth=15)
+    model = RandomForestClassifier(n_estimators=144, random_state=56, max_depth=15)
     model.fit(features_train, label_train)
 
     prediction = model.predict(features_test)
     return accuracy_score(label_test, prediction)
 
 
-def select_file(file_path: str) -> str:
+def select_file(file_path: str) -> tuple[str, float]:
     """
     Extracts the features from the audio file uploaded by the user
     and uses the trained model to make a predicted on the extracted
@@ -95,8 +93,10 @@ def select_file(file_path: str) -> str:
     global model
     features = build_features(file_path)
     curr_mfcc = [mfcc for mfcc in features[-1]]
+    accuracy = train_model(pd.read_csv("audio_features.csv"))
+    prediction = model.predict([features[:-1] + curr_mfcc])[0]
     os.remove(file_path)
-    return model.predict([features[:-1] + curr_mfcc])[0]
+    return prediction, accuracy
 
 
 
@@ -104,9 +104,10 @@ def main():
     """
     Calls extract_features() for feature engineering.
     """
-    # if (not os.path.exists("audio_features.csv")):
-    # extract_features()
-    print(train_model(pd.read_csv("audio_features.csv")))
+    if (not os.path.exists("audio_features.csv")):
+        extract_features()
+    train_model(pd.read_csv("audio_features.csv"))
+    app.run(debug=True)
 
 
 # Creates an instance of the flask web application.
@@ -144,8 +145,8 @@ def calculate(file_name: str):
     from the uploaded audio and a prediction will be made. The accuracy score
     will be displayed as well as the name of genre classified by the model.
     """
-    genre = select_file("audio_music/user_uploads/" + file_name)
-    return render_template("results.html", outcome=f"Genre: {genre}")
+    genre, accuracy = select_file("audio_music/uploads/" + file_name)
+    return render_template("results.html", genre=genre, accuracy=f"{accuracy * 100:.2f}%")
 
 
 @app.route("/display_error/<message>")
@@ -169,4 +170,3 @@ def redirect_to_home(path: str):
 
 if (__name__ == "__main__"):
     main()
-    # app.run(debug=True)
